@@ -119,7 +119,7 @@ def main():
         np.random.seed(args.seed)
         #cudnn.benchmark = True#DARTS
         torch.manual_seed(args.seed)
-        #cudnn.enabled = True#DARTS
+        cudnn.enabled = True#DARTS
         cudnn.deterministic = True
         warnings.warn('You have chosen to seed training. '
                       'This will turn on the CUDNN deterministic setting, '
@@ -173,9 +173,11 @@ def main_worker(gpu, ngpus_per_node, args):
         #print("=> creating model '{}'".format(args.arch))
         print("=> creating model")
         #model = models.__dict__[args.arch]()
-        criterion = nn.CrossEntropyLoss()#DARTS
-        #criterion = criterion.cuda()#DARTS
-        model = Network(args.init_channels, CIFAR_CLASSES, args.layers, criterion)#DARTS
+        # (jones.wz) TO DO: support distributed cases.
+        #torch.cuda.set_device(args.gpu)#DARTS
+        #criterion = nn.CrossEntropyLoss()#DARTS
+        #criterion = criterion.cuda(args.gpu)#DARTS
+        #model = Network(args.init_channels, CIFAR_CLASSES, args.layers, criterion)#DARTS
         #model.cuda()#DARTS
 
     if args.distributed:
@@ -198,18 +200,23 @@ def main_worker(gpu, ngpus_per_node, args):
             model = torch.nn.parallel.DistributedDataParallel(model)
     elif args.gpu is not None:
         torch.cuda.set_device(args.gpu)
+        criterion = nn.CrossEntropyLoss()#DARTS
+        criterion = criterion.cuda(args.gpu)#DARTS
+        model = Network(args.init_channels, CIFAR_CLASSES, args.layers, criterion)#DARTS
         model = model.cuda(args.gpu)
     else:
         # DataParallel will divide and allocate batch_size to all available GPUs
-        if args.arch.startswith('alexnet') or args.arch.startswith('vgg'):
-            model.features = torch.nn.DataParallel(model.features)
-            model.cuda()
-        else:
-            model = torch.nn.DataParallel(model).cuda()
+        #if args.arch.startswith('alexnet') or args.arch.startswith('vgg'):
+        #    model.features = torch.nn.DataParallel(model.features)
+        #    model.cuda()
+        #else:
+        #    model = torch.nn.DataParallel(model).cuda()
+        criterion = nn.CrossEntropyLoss().cuda(args.gpu)
+        model = Network(args.init_channels, CIFAR_CLASSES, args.layers, criterion)
+        model = torch.nn.DataParallel(model).cuda()#DARTS
 
     # define loss function (criterion) and optimizer
     #criterion = nn.CrossEntropyLoss().cuda(args.gpu)
-    criterion.cuda(args.gpu)#DARTS
 
     optimizer = torch.optim.SGD(model.parameters(), args.learning_rate,
                                 momentum=args.momentum,

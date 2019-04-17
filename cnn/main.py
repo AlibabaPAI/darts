@@ -31,7 +31,7 @@ model_names = sorted(name for name in models.__dict__
     if name.islower() and not name.startswith("__")
     and callable(models.__dict__[name]))
 
-parser = argparse.ArgumentParser(description='PyTorch Cifar-10/ImageNet Training')
+parser = argparse.ArgumentParser(description='PyTorch Cifar-10 Training')
 #parser.add_argument('data', metavar='DIR',
 #                    help='path to dataset')
 parser.add_argument('--data', type=str, default='../data', help='location of the data corpus')#DARTS
@@ -105,7 +105,62 @@ CIFAR_CLASSES = 10
 best_acc1 = 0
 
 
+class MyDataParallel(torch.nn.DataParallel):
+    def arch_parameters(self):
+        return self.module.arch_parameters()
+
+    #def _loss(self, input, target):
+    #    return self.module._loss(input, target)
+    @property
+    def _criterion(self):
+        return self.module._criterion
+
+    def new(self):
+        return self.module.new()
+
+    def genotype(self):
+        return self.module.genotype()
+
+    @property
+    def alphas_normal(self):
+        return self.module.alphas_normal
+
+    @property
+    def alphas_reduce(self):
+        return self.module.alphas_reduce
+
+
+class MyDistributedDataParallel(torch.nn.parallel.DistributedDataParallel):
+    def arch_parameters(self):
+        return self.module.arch_parameters()
+
+    #def _loss(self, input, target):
+    #    return self.module._loss(input, target)
+    @property
+    def _criterion(self):
+        return self.module._criterion
+
+    def new(self):
+        return self.module.new()
+
+    def genotype(self):
+        return self.module.genotype()
+
+    @property
+    def alphas_normal(self):
+        return self.module.alphas_normal
+
+    @property
+    def alphas_reduce(self):
+        return self.module.alphas_reduce
+
+
 def main():
+    """
+    single-gpu: python main.py --gpu 1 (suppose you want to use cuda:1)
+    single-process multi-gpu: python main.py
+    multi-process multi-gpu (both single-node and multi-node): e.g., python main.py --dist-url 'tcp://127.0.0.1:6666' --dist-backend 'nccl' --multiprocessing-distributed --world-size 1 --rank 0
+    """
     args = parser.parse_args()
     args.save = 'search-{}-{}'.format(args.save, time.strftime("%Y%m%d-%H%M%S"))
     utils.create_exp_dir(args.save, scripts_to_save=glob.glob('*.py'))
@@ -186,13 +241,17 @@ def main_worker(gpu, ngpus_per_node, args):
         # DistributedDataParallel will use all available devices.
         if args.gpu is not None:
             torch.cuda.set_device(args.gpu)
+            criterion = nn.CrossEntropyLoss()#DARTS
+            criterion = criterion.cuda(args.gpu)#DARTS
+            model = Network(args.init_channels, CIFAR_CLASSES, args.layers, criterion)#DARTS
             model.cuda(args.gpu)
             # When using a single GPU per process and per
             # DistributedDataParallel, we need to divide the batch size
             # ourselves based on the total number of GPUs we have
             args.batch_size = int(args.batch_size / ngpus_per_node)
             args.workers = int(args.workers / ngpus_per_node)
-            model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
+            #model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
+            model = MyDistributedDataParallel(model, device_ids=[args.gpu])
         else:
             model.cuda()
             # DistributedDataParallel will divide and allocate batch_size to all
@@ -213,7 +272,8 @@ def main_worker(gpu, ngpus_per_node, args):
         #    model = torch.nn.DataParallel(model).cuda()
         criterion = nn.CrossEntropyLoss().cuda(args.gpu)
         model = Network(args.init_channels, CIFAR_CLASSES, args.layers, criterion)
-        model = torch.nn.DataParallel(model).cuda()#DARTS
+        #model = torch.nn.DataParallel(model).cuda()#DARTS
+        model = MyDataParallel(model).cuda()#DARTS
 
     # define loss function (criterion) and optimizer
     #criterion = nn.CrossEntropyLoss().cuda(args.gpu)
@@ -256,18 +316,22 @@ def main_worker(gpu, ngpus_per_node, args):
     #        normalize,
     #    ]))
     train_transform, valid_transform = utils._data_transforms_cifar10(args)#DARTS
-    train_dataset = datasets.CIFAR10(root=args.data, train=True, download=True, transform=train_transform)#DARTS
-    num_train = len(train_dataset)#DARTS
-    indices = list(range(num_train))#DARTS
-    split = int(np.floor(args.train_portion * num_train))#DARTS
+    considered_dataset = datasets.CIFAR10(root=args.data, train=True, download=True, transform=train_transform)#DARTS
+    num_examples = len(considered_dataset)#DARTS
+    indices = list(range(num_examples))#DARTS
+    split = int(np.floor(args.train_portion * num_examples))#DARTS
+    train_dataset = torch.utils.data.Subset(considered_dataset, indices[:split])
+    valid_dataset = torch.utils.data.Subset(considered_dataset, indices[split:])
 
     if args.distributed:
         train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
-        valid_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)#DARTS
+        valid_sampler = torch.utils.data.distributed.DistributedSampler(valid_dataset)#DARTS
     else:
         #train_sampler = None
-        train_sampler = torch.utils.data.sampler.SubsetRandomSampler(indices[:split])#DARTS
-        valid_sampler = torch.utils.data.sampler.SubsetRandomSampler(indices[split:num_train])#DARTS
+        #train_sampler = torch.utils.data.sampler.SubsetRandomSampler(indices[:split])#DARTS
+        #valid_sampler = torch.utils.data.sampler.SubsetRandomSampler(indices[split:num_train])#DARTS
+        train_sampler = None
+        valid_sampler = None
 
     train_loader = torch.utils.data.DataLoader(
         train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),
@@ -302,10 +366,10 @@ def main_worker(gpu, ngpus_per_node, args):
             train_sampler.set_epoch(epoch)
         #adjust_learning_rate(optimizer, epoch, args)
         lr = scheduler.get_lr()[0]#DARTS
-        print("epoch %d lr %e", epoch, lr)#DARTS
+        print("epoch %d lr %e"%(epoch, lr))#DARTS
 
         genotype = model.genotype()#DARTS
-        print('genotype = %s', genotype)#DARTS
+        print('genotype = {}'.format(genotype))#DARTS
 
         print(F.softmax(model.alphas_normal, dim=-1))#DARTS
         print(F.softmax(model.alphas_reduce, dim=-1))#DARTS
@@ -313,12 +377,12 @@ def main_worker(gpu, ngpus_per_node, args):
         # train for one epoch
         #train(train_loader, model, criterion, optimizer, epoch, args)
         train_acc, train_obj = train(train_loader, val_loader, model, architect, criterion, optimizer, lr, args)#DARTS
-        print("train_acc %f", train_acc)#DARTS
+        print("train_acc %f"%(train_acc))#DARTS
 
         # evaluate on validation set
         #acc1 = validate(val_loader, model, criterion, args)
         valid_acc, valid_obj = infer(val_loader, model, criterion, args)#DARTS
-        print('valid_acc %f', valid_acc)#DARTS
+        print('valid_acc %f'%(valid_acc))#DARTS
 
         # remember best acc@1 and save checkpoint
         #is_best = acc1 > best_acc1

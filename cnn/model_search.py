@@ -93,6 +93,7 @@ class Network(nn.Module):
     self.global_pooling = nn.AdaptiveAvgPool2d(1)
     self.classifier = nn.Linear(C_prev, num_classes)
 
+    self._network_parameters = [param for param in self.parameters()]
     self._initialize_alphas()
 
   def new(self):
@@ -130,6 +131,9 @@ class Network(nn.Module):
       self.alphas_reduce,
     ]
 
+  def network_parameters(self):
+    return self._network_parameters
+
   def arch_parameters(self):
     return self._arch_parameters
 
@@ -164,3 +168,11 @@ class Network(nn.Module):
     )
     return genotype
 
+
+if __name__=="__main__":
+    # for understanding pytorch...
+    criterion = nn.CrossEntropyLoss()
+    network = Network(16, 10, 8, criterion)
+    print(len([param for param in network.parameters()]))
+    print(len(network._network_parameters))
+    print(len(network._arch_parameters))

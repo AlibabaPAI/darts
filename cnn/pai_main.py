@@ -1,3 +1,7 @@
+from __future__ import absolute_import
+from __future__ import print_function
+from __future__ import division
+
 import argparse
 import os
 import random
@@ -34,7 +38,7 @@ model_names = sorted(name for name in models.__dict__
 parser = argparse.ArgumentParser(description='PyTorch Cifar-10 Training')
 #parser.add_argument('data', metavar='DIR',
 #                    help='path to dataset')
-parser.add_argument('--data', type=str, default='../data', help='location of the data corpus')#DARTS
+parser.add_argument('--data', type=str, default='/data/volume1/', help='location of the data corpus')#DARTS
 parser.add_argument('-a', '--arch', metavar='ARCH', default='resnet18',
                     choices=model_names,
                     help='model architecture: ' +
@@ -51,7 +55,7 @@ parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
 #                    help='mini-batch size (default: 256), this is the total '
 #                         'batch size of all GPUs on the current node when '
 #                         'using Data Parallel or Distributed Data Parallel')
-parser.add_argument('--batch_size', type=int, default=64, help='batch size')#DARTS
+parser.add_argument('--batch_size', type=int, default=32, help='batch size')#DARTS#PAI
 #parser.add_argument('--lr', '--learning-rate', default=0.025, type=float,
 #                    metavar='LR', help='initial learning rate', dest='lr')
 parser.add_argument('--learning_rate', type=float, default=0.025, help='init learning rate')#DARTS
@@ -70,7 +74,7 @@ parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
                     help='evaluate model on validation set')
 parser.add_argument('--pretrained', dest='pretrained', action='store_true',
                     help='use pre-trained model')
-parser.add_argument('--world-size', default=-1, type=int,
+parser.add_argument('--world-size', default=2, type=int,
                     help='number of nodes for distributed training')
 parser.add_argument('--rank', default=-1, type=int,
                     help='node rank for distributed training')
@@ -163,10 +167,7 @@ class MyDistributedDataParallel(torch.nn.parallel.DistributedDataParallel):
 
 def main():
     """
-    single-gpu: python main.py --gpu 1 (suppose you want to use cuda:1)
-    single-process multi-gpu: python main.py
-    multi-process multi-gpu (both single-node and multi-node): e.g.,
-        python main.py --dist-url 'tcp://127.0.0.1:6666' --dist-backend 'nccl' --multiprocessing-distributed --world-size 1 --rank 0
+    pai -name pytorch ...
     """
     args = parser.parse_args()
     args.save = 'search-{}-{}'.format(args.save, time.strftime("%Y%m%d-%H%M%S"))
@@ -193,22 +194,26 @@ def main():
         warnings.warn('You have chosen a specific GPU. This will completely '
                       'disable data parallelism.')
 
-    if args.dist_url == "env://" and args.world_size == -1:
-        args.world_size = int(os.environ["WORLD_SIZE"])
+    #if args.dist_url == "env://" and args.world_size == -1:
+    #    args.world_size = int(os.environ["WORLD_SIZE"])
 
-    args.distributed = args.world_size > 1 or args.multiprocessing_distributed
+    #args.distributed = args.world_size > 1 or args.multiprocessing_distributed
+    args.distributed = True#PAI
+    #args.multiprocessing_distributed = True#PAI
 
     ngpus_per_node = torch.cuda.device_count()
-    if args.multiprocessing_distributed:
-        # Since we have ngpus_per_node processes per node, the total world_size
-        # needs to be adjusted accordingly
-        args.world_size = ngpus_per_node * args.world_size
-        # Use torch.multiprocessing.spawn to launch distributed processes: the
-        # main_worker process function
-        mp.spawn(main_worker, nprocs=ngpus_per_node, args=(ngpus_per_node, args))
-    else:
-        # Simply call main_worker function
-        main_worker(args.gpu, ngpus_per_node, args)
+    print("{} gpu(s) available".format(ngpus_per_node))
+    #if args.multiprocessing_distributed:
+    #    #Since we have ngpus_per_node processes per node, the total world_size
+    #    #needs to be adjusted accordingly
+    #    #args.world_size = ngpus_per_node * args.world_size
+    #    #Use torch.multiprocessing.spawn to launch distributed processes: the
+    #    #main_worker process function
+    #    mp.spawn(main_worker, nprocs=ngpus_per_node, args=(ngpus_per_node, args))
+    #else:
+    #    #Simply call main_worker function
+    #    main_worker(args.gpu, ngpus_per_node, args)
+    main_worker(args.gpu, ngpus_per_node, args)
 
 
 def main_worker(gpu, ngpus_per_node, args):
@@ -225,8 +230,10 @@ def main_worker(gpu, ngpus_per_node, args):
             # For multiprocessing distributed training, rank needs to be the
             # global rank among all the processes
             args.rank = args.rank * ngpus_per_node + gpu
-        dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
-                                world_size=args.world_size, rank=args.rank)
+        #dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
+        #                        world_size=args.world_size, rank=args.rank)
+        torch.distributed.init_process_group(backend=args.dist_backend)#PAI
+
     # create model
     if args.pretrained:
         print("=> using pre-trained model '{}'".format(args.arch))
@@ -260,10 +267,15 @@ def main_worker(gpu, ngpus_per_node, args):
             #model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
             model = MyDistributedDataParallel(model, device_ids=[args.gpu])
         else:
+            criterion = nn.CrossEntropyLoss()#DARTS
+            criterion = criterion.cuda(args.gpu)#DARTS
+            model = Network(args.init_channels, CIFAR_CLASSES, args.layers, criterion)#DARTS
+            #model = model.cuda()#PAI
             model.cuda()
             # DistributedDataParallel will divide and allocate batch_size to all
             # available GPUs if device_ids are not set
-            model = torch.nn.parallel.DistributedDataParallel(model)
+            #model = torch.nn.parallel.DistributedDataParallel(model)
+            model = MyDistributedDataParallel(model)
     elif args.gpu is not None:
         torch.cuda.set_device(args.gpu)
         criterion = nn.CrossEntropyLoss()#DARTS
@@ -285,9 +297,13 @@ def main_worker(gpu, ngpus_per_node, args):
     # define loss function (criterion) and optimizer
     #criterion = nn.CrossEntropyLoss().cuda(args.gpu)
 
+    #optimizer = torch.optim.SGD(model.parameters(), args.learning_rate,
+    #                            momentum=args.momentum,
+    #                            weight_decay=args.weight_decay)
     optimizer = torch.optim.SGD(model.network_parameters(), args.learning_rate,
                                 momentum=args.momentum,
                                 weight_decay=args.weight_decay)
+
 
     # optionally resume from a checkpoint
     if args.resume:
@@ -329,6 +345,7 @@ def main_worker(gpu, ngpus_per_node, args):
     split = int(np.floor(args.train_portion * num_examples))#DARTS
     train_dataset = torch.utils.data.Subset(considered_dataset, indices[:split])
     valid_dataset = torch.utils.data.Subset(considered_dataset, indices[split:])
+
 
     if args.distributed:
         train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
@@ -413,7 +430,11 @@ def train(train_queue, valid_queue, model, architect, criterion, optimizer, lr, 
     top1 = utils.AvgrageMeter()
     top5 = utils.AvgrageMeter()
 
+    first_time = True
     for step, (input, target) in enumerate(train_queue):
+        if first_time:
+            print(target.shape)
+            first_time = False
         model.train()
         n = input.size(0)
         
@@ -604,6 +625,7 @@ class AverageMeter(object):
         return fmtstr.format(**self.__dict__)
 
 
+"""
 class ProgressMeter(object):
     def __init__(self, num_batches, *meters, prefix=""):
         self.batch_fmtstr = self._get_batch_fmtstr(num_batches)
@@ -619,6 +641,7 @@ class ProgressMeter(object):
         num_digits = len(str(num_batches // 1))
         fmt = '{:' + str(num_digits) + 'd}'
         return '[' + fmt + '/' + fmt.format(num_batches) + ']'
+"""
 
 
 def adjust_learning_rate(optimizer, epoch, args):

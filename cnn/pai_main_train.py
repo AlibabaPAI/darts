@@ -19,7 +19,7 @@ from model import NetworkCIFAR as Network
 
 parser = argparse.ArgumentParser("cifar")
 parser.add_argument('--data', type=str, default='/data/volume1/', help='location of the data corpus')
-parser.add_argument('--batch_size', type=int, default=32, help='batch size')
+parser.add_argument('--batch_size', type=int, default=48, help='batch size')
 parser.add_argument('--learning_rate', type=float, default=0.025, help='init learning rate')
 parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
 parser.add_argument('--weight_decay', type=float, default=3e-4, help='weight decay')
@@ -35,7 +35,7 @@ parser.add_argument('--cutout', action='store_true', default=False, help='use cu
 parser.add_argument('--cutout_length', type=int, default=16, help='cutout length')
 parser.add_argument('--drop_path_prob', type=float, default=0.2, help='drop path probability')
 parser.add_argument('--save', type=str, default='EXP', help='experiment name')
-parser.add_argument('--seed', type=int, default=0, help='random seed')
+parser.add_argument('--seed', type=int, default=2, help='random seed')
 parser.add_argument('--arch', type=str, default='DARTS', help='which architecture to use')
 parser.add_argument('--grad_clip', type=float, default=5, help='gradient clipping')
 args = parser.parse_args()
@@ -113,7 +113,7 @@ def main():
   train_sampler = torch.utils.data.distributed.DistributedSampler(train_data)
 
   train_queue = torch.utils.data.DataLoader(
-      train_data, batch_size=args.batch_size, shuffle=False, pin_memory=True, num_workers=2, sampler=train_sampler)
+      train_data, batch_size=args.batch_size, shuffle=(train_sampler is None), pin_memory=True, num_workers=2, sampler=train_sampler)
 
   valid_queue = torch.utils.data.DataLoader(
       valid_data, batch_size=args.batch_size, shuffle=False, pin_memory=True, num_workers=2)

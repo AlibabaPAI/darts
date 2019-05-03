@@ -130,9 +130,13 @@ def train(train_queue, model, criterion, optimizer, args):
   model.train()
 
   for step, (input, target) in enumerate(train_queue):
-    if args.gpu is not None:
-      input = input.cuda(args.gpu, non_blocking=True)
-    target = target.cuda(args.gpu, non_blocking=True)
+    # latest
+    #if args.gpu is not None:
+    #  input = input.cuda(args.gpu, non_blocking=True)
+    #target = target.cuda(args.gpu, non_blocking=True)
+    # v0.3.1
+    input = Variable(input).cuda()
+    target = Variable(target).cuda(async=True)
 
     optimizer.zero_grad()
     logits, logits_aux = model(input)
@@ -146,9 +150,14 @@ def train(train_queue, model, criterion, optimizer, args):
 
     prec1, prec5 = utils.accuracy(logits, target, topk=(1, 5))
     n = input.size(0)
-    objs.update(loss.data.item(), n)
-    top1.update(prec1.data.item(), n)
-    top5.update(prec5.data.item(), n)
+    # latest
+    #objs.update(loss.data.item(), n)
+    #top1.update(prec1.data.item(), n)
+    #top5.update(prec5.data.item(), n)
+    # v0.3.1
+    objs.update(loss.data[0], n)
+    top1.update(prec1.data[0], n)
+    top5.update(prec5.data[0], n)
 
     if step % args.report_freq == 0:
       logging.info('train %03d %e %f %f', step, objs.avg, top1.avg, top5.avg)
@@ -163,18 +172,27 @@ def infer(valid_queue, model, criterion, args):
   model.eval()
 
   for step, (input, target) in enumerate(valid_queue):
-    if args.gpu is not None:
-      input = input.cuda(args.gpu, non_blocking=True)
-    target = target.cuda(args.gpu, non_blocking=True)
+    # latest
+    #if args.gpu is not None:
+    #  input = input.cuda(args.gpu, non_blocking=True)
+    #target = target.cuda(args.gpu, non_blocking=True)
+    # v0.3.1
+    input = Variable(input, volatile=True).cuda()
+    target = Variable(target, volatile=True).cuda(async=True)
 
     logits, _ = model(input)
     loss = criterion(logits, target)
 
     prec1, prec5 = utils.accuracy(logits, target, topk=(1, 5))
     n = input.size(0)
-    objs.update(loss.data.item(), n)
-    top1.update(prec1.data.item(), n)
-    top5.update(prec5.data.item(), n)
+    # latest
+    #objs.update(loss.data.item(), n)
+    #top1.update(prec1.data.item(), n)
+    #top5.update(prec5.data.item(), n)
+    # v0.3.1
+    objs.update(loss.data[0], n)
+    top1.update(prec1.data[0], n)
+    top5.update(prec5.data[0], n)
 
     if step % args.report_freq == 0:
       logging.info('valid %03d %e %f %f', step, objs.avg, top1.avg, top5.avg)
